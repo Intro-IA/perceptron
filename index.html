@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simulador Perceptrón</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+  <div class="max-w-6xl mx-auto p-4">
+    <h1 class="text-2xl font-bold mb-6 text-center">Simulador de Perceptrón Simple - Paso a Paso</h1>
+
+    <!-- Visualización de ejemplos -->
+    <div class="mb-6">
+      <h2 class="text-xl font-bold">Ejemplos de Entrenamiento (Vista 4x4)</h2>
+      <div class="grid grid-cols-4 gap-4" id="gridEjemplos"></div>
+    </div>
+
+    <!-- Paneles principales -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Panel de Visualización -->
+      <div class="bg-white rounded-xl shadow-xl p-6 space-y-4">
+        <h2 class="text-xl font-bold">Paso Actual</h2>
+        <p><strong>Iteración:</strong> <span id="iteracion">0</span></p>
+        <p><strong>Ejemplo elegido:</strong> <span id="ejemplo"></span></p>
+        <p><strong>Salida esperada:</strong> <span id="salida"></span></p>
+        <p><strong>Excitación:</strong> <span id="excitacion"></span></p>
+        <p><strong>Activación:</strong> <span id="activacion"></span></p>
+        <p><strong>Δw:</strong> <span id="deltaW"></span></p>
+        <p><strong>Nuevo w:</strong> <span id="pesos"></span></p>
+        <p class="text-red-500 font-semibold">Error total: <span id="error"></span></p>
+      </div>
+
+      <!-- Panel de Control -->
+      <div class="bg-gray-100 rounded-xl shadow-lg p-6 space-y-4">
+        <h2 class="text-xl font-bold">Controles</h2>
+        <label class="block">
+          Tasa de aprendizaje η
+          <input id="tasa" type="range" min="0.01" max="1" step="0.01" value="0.1" class="w-full">
+        </label>
+        <label class="block">
+          Iteraciones máximas (COTA)
+          <input id="cota" type="number" min="1" max="100" value="20" class="w-full border p-2 rounded">
+        </label>
+        <div class="flex gap-4 flex-wrap">
+          <button onclick="paso()" class="bg-blue-600 text-white px-4 py-2 rounded shadow">Siguiente Paso</button>
+          <button onclick="autoRun()" class="bg-green-500 text-white px-4 py-2 rounded shadow">Ejecutar automáticamente</button>
+          <button onclick="pausarAutoRun()" class="bg-yellow-500 text-white px-4 py-2 rounded shadow">Pausar</button>
+          <button onclick="resetSimulador()" class="bg-red-500 text-white px-4 py-2 rounded shadow">Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gráfico de error -->
+    <div class="bg-white rounded-xl shadow-xl p-6 mt-8">
+      <h2 class="text-xl font-bold mb-4">Evolución del Error</h2>
+      <canvas id="graficoError" height="100"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const ejemplos = [
+      { x: [0,1,0,0, 1,1,1,0, 0,1,0,0, 0,0,0,0], y: 1 }, // cruz
+      { x: [0,1,0,0, 0,1,0,0, 0,1,0,0, 0,1,0,0], y: 0 }, // línea vertical
+      { x: [0,0,0,0, 1,1,1,1, 0,0,0,0, 0,0,0,0], y: 0 }, // línea horizontal
+      { x: [0,0,0,0, 0,1,1,0, 0,1,1,0, 0,0,0,0], y: 1 }, // cuadrado
+    ];
+
+    let w, i, error, intervalo;
+    let errores = [];
+    let chart;
+
+    function renderEjemplos() {
+      const container = document.getElementById("gridEjemplos");
+      container.innerHTML = "";
+      ejemplos.forEach((ej) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "text-center";
+        const grid = document.createElement("div");
+        grid.className = "grid grid-cols-4 gap-0.5";
+        ej.x.forEach(pixel => {
+          const cell = document.createElement("div");
+          cell.className = pixel ? "bg-black w-4 h-4" : "bg-white border w-4 h-4";
+          grid.appendChild(cell);
+        });
+        const label = document.createElement("div");
+        const z = dot(ej.x, w);
+        const a = activacion(z);
+        label.textContent = `y = ${ej.y} | salida = ${a}`;
+        label.className = "text-sm mt-1 font-semibold " + (ej.y === a ? "text-green-600" : "text-red-600");
+        wrapper.appendChild(grid);
+        wrapper.appendChild(label);
+        container.appendChild(wrapper);
+      });
+    }
+
+    function inicializar() {
+      w = Array(16).fill(0);
+      i = 0;
+      error = 1;
+      errores = [1];
+      actualizarDisplay();
+      inicializarGrafico();
+    }
+
+    function activacion(z) {
+      return z > 0 ? 1 : 0;
+    }
+
+    function calcularError() {
+      let total = 0;
+      for (let ej of ejemplos) {
+        const z = dot(ej.x, w);
+        const a = activacion(z);
+        total += Math.pow(ej.y - a, 2);
+      }
+      return total;
+    }
+
+    function dot(a, b) {
+      return a.reduce((acc, val, idx) => acc + val * b[idx], 0);
+    }
+
+    function paso() {
+      const eta = parseFloat(document.getElementById("tasa").value);
+      const cota = parseInt(document.getElementById("cota").value);
+      if (error <= 0 || i >= cota) return;
+      const idx = Math.floor(Math.random() * ejemplos.length);
+      const ej = ejemplos[idx];
+      const z = dot(ej.x, w);
+      const a = activacion(z);
+      const deltaW = ej.x.map((xi, j) => eta * (ej.y - a) * xi);
+      w = w.map((wi, j) => wi + deltaW[j]);
+      error = calcularError();
+      errores.push(error);
+      i++;
+      actualizarDisplay(ej, z, a, deltaW);
+      actualizarGrafico();
+    }
+
+    function autoRun() {
+      if (intervalo) return;
+      intervalo = setInterval(() => {
+        paso();
+        if (error <= 0 || i >= parseInt(document.getElementById("cota").value)) {
+          clearInterval(intervalo);
+          intervalo = null;
+        }
+      }, 500);
+    }
+
+    function pausarAutoRun() {
+      clearInterval(intervalo);
+      intervalo = null;
+    }
+
+    function actualizarDisplay(ej = { x: [], y: "" }, z = "", a = "", deltaW = ["", ""]) {
+      document.getElementById("iteracion").innerText = i;
+      document.getElementById("ejemplo").innerText = ej.x.length ? `[${ej.x.join(", ")}], y′ = ${ej.y}` : "";
+      document.getElementById("salida").innerText = ej.y;
+      document.getElementById("excitacion").innerText = z !== "" ? z.toFixed(2) : "";
+      document.getElementById("activacion").innerText = a;
+      document.getElementById("deltaW").innerText = `[${deltaW.map(x => x.toFixed ? x.toFixed(2) : "").join(", ")}]`;
+      document.getElementById("pesos").innerText = `[${w.map(x => x.toFixed(2)).join(", ")}]`;
+      document.getElementById("error").innerText = error.toFixed(2);
+      renderEjemplos();
+    }
+
+    function resetSimulador() {
+      clearInterval(intervalo);
+      inicializar();
+    }
+
+    function inicializarGrafico() {
+      const ctx = document.getElementById('graficoError').getContext('2d');
+      if (chart) chart.destroy();
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [0],
+          datasets: [{
+            label: 'Error total',
+            data: [1],
+            borderColor: 'rgb(220, 38, 38)',
+            backgroundColor: 'rgba(220, 38, 38, 0.2)',
+            fill: true,
+            tension: 0.2
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            x: { title: { display: true, text: 'Iteración' }},
+            y: { title: { display: true, text: 'Error' }, min: 0 }
+          }
+        }
+      });
+    }
+
+    function actualizarGrafico() {
+      if (chart) {
+        chart.data.labels.push(i);
+        chart.data.datasets[0].data.push(error);
+        chart.update();
+      }
+    }
+
+    inicializar();
+  </script>
+</body>
+</html>
